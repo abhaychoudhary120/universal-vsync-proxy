@@ -11,6 +11,7 @@ rem Locate a 64-bit and a 32-bit MinGW-w64 compiler.
 rem ---------------------------------------------------------------------------
 set "X64_GXX=%LOCALAPPDATA%\Programs\mingw64\bin\g++.exe"
 if not exist "%X64_GXX%" set "X64_GXX=%ProgramFiles%\mingw64\bin\g++.exe"
+if not exist "%X64_GXX%" set "X64_GXX=C:\msys64\ucrt64\bin\g++.exe"
 if not exist "%X64_GXX%" set "X64_GXX=C:\msys64\mingw64\bin\g++.exe"
 if not exist "%X64_GXX%" set "X64_GXX=C:\mingw64\bin\g++.exe"
 
