@@ -1,0 +1,21 @@
+# Build outputs
+build/
+dist/
+
+# Local configuration
+vsync.ini
+
+# Compiler and linker intermediates
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

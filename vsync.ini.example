@@ -1,0 +1,5 @@
+[VSync]
+; Number of vblank periods to wait in Present.
+; Allowed range: 1..4. Missing or invalid values fall back to 1.
+; 1 = normal V-Sync, 2 = half refresh rate, 3/4 = thirds/quarters.
+SyncInterval=1

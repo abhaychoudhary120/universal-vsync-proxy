@@ -1,0 +1,21 @@
+LIBRARY dxgi
+EXPORTS
+    ApplyCompatResolutionQuirking=vs_fwd_stub_ApplyCompatResolutionQuirking
+    CompatString=vs_fwd_stub_CompatString
+    CompatValue=vs_fwd_stub_CompatValue
+    CreateDXGIFactory=ProxyCreateDXGIFactory
+    CreateDXGIFactory1=ProxyCreateDXGIFactory1
+    CreateDXGIFactory2=ProxyCreateDXGIFactory2
+    DXGID3D10CreateDevice=vs_fwd_stub_DXGID3D10CreateDevice
+    DXGID3D10CreateLayeredDevice=vs_fwd_stub_DXGID3D10CreateLayeredDevice
+    DXGID3D10GetLayeredDeviceSize=vs_fwd_stub_DXGID3D10GetLayeredDeviceSize
+    DXGID3D10RegisterLayers=vs_fwd_stub_DXGID3D10RegisterLayers
+    DXGIDeclareAdapterRemovalSupport=vs_fwd_stub_DXGIDeclareAdapterRemovalSupport
+    DXGIDumpJournal=vs_fwd_stub_DXGIDumpJournal
+    DXGIGetDebugInterface1=vs_fwd_stub_DXGIGetDebugInterface1
+    DXGIReportAdapterConfiguration=vs_fwd_stub_DXGIReportAdapterConfiguration
+    PIXBeginCapture=vs_fwd_stub_PIXBeginCapture
+    PIXEndCapture=vs_fwd_stub_PIXEndCapture
+    PIXGetCaptureState=vs_fwd_stub_PIXGetCaptureState
+    SetAppCompatStringPointer=vs_fwd_stub_SetAppCompatStringPointer
+    UpdateHMDEmulationStatus=vs_fwd_stub_UpdateHMDEmulationStatus
