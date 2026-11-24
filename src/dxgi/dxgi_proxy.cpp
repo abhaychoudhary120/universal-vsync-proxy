@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <dxgi1_2.h>
 
+#include "common/debug_log.h"
 #include "common/forwarder.h"
 #include "common/proxy_common.h"
 #include "dxgi_forwarders.h"
@@ -46,12 +47,13 @@ using CreateSwapChainForCompositionFn = HRESULT(STDMETHODCALLTYPE*)(
 using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
 using Present1Fn = HRESULT(STDMETHODCALLTYPE*)(
     IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
+using SetAppCompatStringPointerFn = void(WINAPI*)(ULONG_PTR, const char*);
 
 // Factory vtable layout (stable since DXGI 1.0 / 1.2).
 constexpr std::size_t kFactoryCreateSwapChain = 10;
 constexpr std::size_t kFactoryCreateSwapChainForHwnd = 15;
 constexpr std::size_t kFactoryCreateSwapChainForCoreWindow = 16;
-constexpr std::size_t kFactoryCreateSwapChainForComposition = 24;
+constexpr std::size_t kFactoryCreateSwapChainForComposition = 21;
 
 // Swap-chain vtable layout (IDXGISwapChain / IDXGISwapChain1).
 constexpr std::size_t kSwapChainPresent = 8;
@@ -75,6 +77,11 @@ CreateSwapChainForCompositionFn g_orig_create_swap_chain_for_composition =
 void** g_swap_chain_vtable = nullptr;
 PresentFn g_orig_present = nullptr;
 Present1Fn g_orig_present1 = nullptr;
+
+// Filled by AppCompat before DllMain can resolve the real dxgi export.
+ULONG_PTR g_pending_compat_value = 0;
+const char* g_pending_compat_text = nullptr;
+bool g_compat_pending = false;
 
 HRESULT STDMETHODCALLTYPE CreateSwapChainHook(
     IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
@@ -101,6 +108,9 @@ void InstallFactoryHooks(IUnknown* factory) noexcept {
 
     void** vtable = vsync_proxy::VtableOf(factory);
 
+    VS_LOG_PTR("InstallFactoryHooks factory", factory);
+    VS_LOG_PTR("InstallFactoryHooks vtable", vtable);
+
     // Query outside the hook-install critical section. This reference is only
     // used to decide whether the IDXGIFactory2 creation methods exist.
     IDXGIFactory2* factory2 = nullptr;
@@ -109,6 +119,8 @@ void InstallFactoryHooks(IUnknown* factory) noexcept {
                                           reinterpret_cast<void**>(&factory2))) &&
         factory2 != nullptr;
 
+    VS_LOG_PTR("InstallFactoryHooks factory2", factory2);
+
     vsync_proxy::LockHookInstall();
     if (g_factory_vtable == nullptr) {
         const bool patched = vsync_proxy::PatchVtableSlot(
@@ -116,21 +128,47 @@ void InstallFactoryHooks(IUnknown* factory) noexcept {
             reinterpret_cast<void*>(&CreateSwapChainHook),
             reinterpret_cast<void**>(&g_orig_create_swap_chain));
 
+        VS_LOG_PTR("InstallFactoryHooks patched CreateSwapChain",
+                   reinterpret_cast<void*>(patched));
+        VS_LOG_PTR("InstallFactoryHooks orig CreateSwapChain",
+                   reinterpret_cast<void*>(g_orig_create_swap_chain));
+
         if (patched && has_factory2) {
-            vsync_proxy::PatchVtableSlot(
-                vtable, kFactoryCreateSwapChainForHwnd,
-                reinterpret_cast<void*>(&CreateSwapChainForHwndHook),
-                reinterpret_cast<void**>(&g_orig_create_swap_chain_for_hwnd));
-            vsync_proxy::PatchVtableSlot(
-                vtable, kFactoryCreateSwapChainForCoreWindow,
-                reinterpret_cast<void*>(&CreateSwapChainForCoreWindowHook),
-                reinterpret_cast<void**>(
-                    &g_orig_create_swap_chain_for_core_window));
-            vsync_proxy::PatchVtableSlot(
-                vtable, kFactoryCreateSwapChainForComposition,
-                reinterpret_cast<void*>(&CreateSwapChainForCompositionHook),
-                reinterpret_cast<void**>(
-                    &g_orig_create_swap_chain_for_composition));
+            const bool patched_hwnd [[maybe_unused]] =
+                vsync_proxy::PatchVtableSlot(
+                    vtable, kFactoryCreateSwapChainForHwnd,
+                    reinterpret_cast<void*>(&CreateSwapChainForHwndHook),
+                    reinterpret_cast<void**>(
+                        &g_orig_create_swap_chain_for_hwnd));
+            const bool patched_core [[maybe_unused]] =
+                vsync_proxy::PatchVtableSlot(
+                    vtable, kFactoryCreateSwapChainForCoreWindow,
+                    reinterpret_cast<void*>(&CreateSwapChainForCoreWindowHook),
+                    reinterpret_cast<void**>(
+                        &g_orig_create_swap_chain_for_core_window));
+            const bool patched_comp [[maybe_unused]] =
+                vsync_proxy::PatchVtableSlot(
+                    vtable, kFactoryCreateSwapChainForComposition,
+                    reinterpret_cast<void*>(
+                        &CreateSwapChainForCompositionHook),
+                    reinterpret_cast<void**>(
+                        &g_orig_create_swap_chain_for_composition));
+
+            VS_LOG_PTR("InstallFactoryHooks patched hwnd",
+                       reinterpret_cast<void*>(patched_hwnd));
+            VS_LOG_PTR("InstallFactoryHooks patched core",
+                       reinterpret_cast<void*>(patched_core));
+            VS_LOG_PTR("InstallFactoryHooks patched composition",
+                       reinterpret_cast<void*>(patched_comp));
+            VS_LOG_PTR("InstallFactoryHooks orig hwnd",
+                       reinterpret_cast<void*>(g_orig_create_swap_chain_for_hwnd));
+            VS_LOG_PTR(
+                "InstallFactoryHooks orig core",
+                reinterpret_cast<void*>(g_orig_create_swap_chain_for_core_window));
+            VS_LOG_PTR(
+                "InstallFactoryHooks orig composition",
+                reinterpret_cast<void*>(
+                    g_orig_create_swap_chain_for_composition));
         }
 
         if (patched) {
@@ -151,12 +189,17 @@ void InstallSwapChainHooks(IDXGISwapChain* swap_chain) noexcept {
 
     void** vtable = vsync_proxy::VtableOf(swap_chain);
 
+    VS_LOG_PTR("InstallSwapChainHooks chain", swap_chain);
+    VS_LOG_PTR("InstallSwapChainHooks vtable", vtable);
+
     IDXGISwapChain1* swap_chain1 = nullptr;
     const bool has_present1 =
         SUCCEEDED(swap_chain->QueryInterface(
             __uuidof(IDXGISwapChain1),
             reinterpret_cast<void**>(&swap_chain1))) &&
         swap_chain1 != nullptr;
+
+    VS_LOG_PTR("InstallSwapChainHooks chain1", swap_chain1);
 
     vsync_proxy::LockHookInstall();
     if (g_swap_chain_vtable == nullptr) {
@@ -165,12 +208,22 @@ void InstallSwapChainHooks(IDXGISwapChain* swap_chain) noexcept {
             reinterpret_cast<void*>(&PresentHook),
             reinterpret_cast<void**>(&g_orig_present));
 
+        VS_LOG_PTR("InstallSwapChainHooks patched Present",
+                   reinterpret_cast<void*>(patched));
+        VS_LOG_PTR("InstallSwapChainHooks orig Present",
+                   reinterpret_cast<void*>(g_orig_present));
+
         if (patched) {
             if (has_present1) {
-                vsync_proxy::PatchVtableSlot(
-                    vtable, kSwapChainPresent1,
-                    reinterpret_cast<void*>(&Present1Hook),
-                    reinterpret_cast<void**>(&g_orig_present1));
+                const bool patched_present1 [[maybe_unused]] =
+                    vsync_proxy::PatchVtableSlot(
+                        vtable, kSwapChainPresent1,
+                        reinterpret_cast<void*>(&Present1Hook),
+                        reinterpret_cast<void**>(&g_orig_present1));
+                VS_LOG_PTR("InstallSwapChainHooks patched Present1",
+                           reinterpret_cast<void*>(patched_present1));
+                VS_LOG_PTR("InstallSwapChainHooks orig Present1",
+                           reinterpret_cast<void*>(g_orig_present1));
             }
             g_swap_chain_vtable = vtable;
         }
@@ -189,8 +242,16 @@ void InstallSwapChainHooks(IDXGISwapChain* swap_chain) noexcept {
 HRESULT STDMETHODCALLTYPE CreateSwapChainHook(
     IDXGIFactory* factory, IUnknown* device, DXGI_SWAP_CHAIN_DESC* desc,
     IDXGISwapChain** swap_chain) {
+    VS_LOG("CreateSwapChainHook enter");
+    VS_LOG_PTR("CreateSwapChainHook orig",
+               reinterpret_cast<void*>(g_orig_create_swap_chain));
+    if (g_orig_create_swap_chain == nullptr) {
+        return E_FAIL;
+    }
     const HRESULT result =
         g_orig_create_swap_chain(factory, device, desc, swap_chain);
+    VS_LOG_PTR("CreateSwapChainHook result chain",
+               swap_chain == nullptr ? nullptr : *swap_chain);
     if (SUCCEEDED(result) && swap_chain != nullptr &&
         *swap_chain != nullptr) {
         InstallSwapChainHooks(*swap_chain);
@@ -203,9 +264,17 @@ HRESULT STDMETHODCALLTYPE CreateSwapChainForHwndHook(
     const DXGI_SWAP_CHAIN_DESC1* desc,
     const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreen_desc,
     IDXGIOutput* restrict_to_output, IDXGISwapChain1** swap_chain) {
+    VS_LOG("CreateSwapChainForHwndHook enter");
+    VS_LOG_PTR("CreateSwapChainForHwndHook orig",
+               reinterpret_cast<void*>(g_orig_create_swap_chain_for_hwnd));
+    if (g_orig_create_swap_chain_for_hwnd == nullptr) {
+        return E_FAIL;
+    }
     const HRESULT result = g_orig_create_swap_chain_for_hwnd(
         factory, device, window, desc, fullscreen_desc, restrict_to_output,
         swap_chain);
+    VS_LOG_PTR("CreateSwapChainForHwndHook result chain",
+               swap_chain == nullptr ? nullptr : *swap_chain);
     if (SUCCEEDED(result) && swap_chain != nullptr &&
         *swap_chain != nullptr) {
         InstallSwapChainHooks(*swap_chain);
@@ -217,6 +286,9 @@ HRESULT STDMETHODCALLTYPE CreateSwapChainForCoreWindowHook(
     IDXGIFactory2* factory, IUnknown* device, IUnknown* window,
     const DXGI_SWAP_CHAIN_DESC1* desc, IDXGIOutput* restrict_to_output,
     IDXGISwapChain1** swap_chain) {
+    if (g_orig_create_swap_chain_for_core_window == nullptr) {
+        return E_FAIL;
+    }
     const HRESULT result = g_orig_create_swap_chain_for_core_window(
         factory, device, window, desc, restrict_to_output, swap_chain);
     if (SUCCEEDED(result) && swap_chain != nullptr &&
@@ -229,6 +301,9 @@ HRESULT STDMETHODCALLTYPE CreateSwapChainForCoreWindowHook(
 HRESULT STDMETHODCALLTYPE CreateSwapChainForCompositionHook(
     IDXGIFactory2* factory, IUnknown* device, const DXGI_SWAP_CHAIN_DESC1* desc,
     IDXGIOutput* restrict_to_output, IDXGISwapChain1** swap_chain) {
+    if (g_orig_create_swap_chain_for_composition == nullptr) {
+        return E_FAIL;
+    }
     const HRESULT result = g_orig_create_swap_chain_for_composition(
         factory, device, desc, restrict_to_output, swap_chain);
     if (SUCCEEDED(result) && swap_chain != nullptr &&
@@ -244,6 +319,9 @@ HRESULT STDMETHODCALLTYPE CreateSwapChainForCompositionHook(
 // ---------------------------------------------------------------------------
 HRESULT STDMETHODCALLTYPE PresentHook(IDXGISwapChain* swap_chain,
                                       UINT sync_interval, UINT flags) {
+    if (g_orig_present == nullptr) {
+        return DXGI_ERROR_INVALID_CALL;
+    }
     if (sync_interval < 1) {
         sync_interval = g_config.sync_interval;
     }
@@ -254,6 +332,9 @@ HRESULT STDMETHODCALLTYPE PresentHook(IDXGISwapChain* swap_chain,
 HRESULT STDMETHODCALLTYPE Present1Hook(
     IDXGISwapChain1* swap_chain, UINT sync_interval, UINT flags,
     const DXGI_PRESENT_PARAMETERS* present_parameters) {
+    if (g_orig_present1 == nullptr) {
+        return DXGI_ERROR_INVALID_CALL;
+    }
     if (sync_interval < 1) {
         sync_interval = g_config.sync_interval;
     }
@@ -269,10 +350,13 @@ HRESULT STDMETHODCALLTYPE Present1Hook(
 // ---------------------------------------------------------------------------
 extern "C" HRESULT WINAPI ProxyCreateDXGIFactory(REFIID riid,
                                                   void** factory) {
+    VS_LOG("ProxyCreateDXGIFactory enter");
     if (g_create_factory == nullptr) {
         return E_FAIL;
     }
     const HRESULT result = g_create_factory(riid, factory);
+    VS_LOG_PTR("ProxyCreateDXGIFactory result",
+               SUCCEEDED(result) && factory != nullptr ? *factory : nullptr);
     if (SUCCEEDED(result) && factory != nullptr && *factory != nullptr) {
         InstallFactoryHooks(reinterpret_cast<IUnknown*>(*factory));
     }
@@ -281,6 +365,7 @@ extern "C" HRESULT WINAPI ProxyCreateDXGIFactory(REFIID riid,
 
 extern "C" HRESULT WINAPI ProxyCreateDXGIFactory1(REFIID riid,
                                                    void** factory) {
+    VS_LOG("ProxyCreateDXGIFactory1 enter");
     if (g_create_factory1 == nullptr) {
         return E_FAIL;
     }
@@ -293,14 +378,41 @@ extern "C" HRESULT WINAPI ProxyCreateDXGIFactory1(REFIID riid,
 
 extern "C" HRESULT WINAPI ProxyCreateDXGIFactory2(UINT flags, REFIID riid,
                                                    void** factory) {
+    VS_LOG("ProxyCreateDXGIFactory2 enter");
+    VS_LOG_PTR("ProxyCreateDXGIFactory2 real",
+               reinterpret_cast<void*>(g_create_factory2));
     if (g_create_factory2 == nullptr) {
         return DXGI_ERROR_UNSUPPORTED;
     }
     const HRESULT result = g_create_factory2(flags, riid, factory);
+    VS_LOG_PTR("ProxyCreateDXGIFactory2 result",
+               SUCCEEDED(result) && factory != nullptr ? *factory : nullptr);
     if (SUCCEEDED(result) && factory != nullptr && *factory != nullptr) {
         InstallFactoryHooks(reinterpret_cast<IUnknown*>(*factory));
     }
+    VS_LOG("ProxyCreateDXGIFactory2 leave");
     return result;
+}
+
+// AppCompat (AcGenral.dll) calls this export while the process is still
+// initializing, potentially before this DLL's entry point has resolved the
+// real function. Cache the arguments until DllMain finishes and replay them.
+// Returning early without touching the arguments is safe in either case.
+extern "C" void WINAPI ProxySetAppCompatStringPointer(ULONG_PTR value,
+                                                      const char* text) {
+    VS_ODS("ProxySetAppCompatStringPointer enter");
+    VS_LOG("ProxySetAppCompatStringPointer enter");
+    if (g_fwd_SetAppCompatStringPointer == nullptr) {
+        VS_ODS("ProxySetAppCompatStringPointer deferred");
+        VS_LOG("ProxySetAppCompatStringPointer deferred");
+        g_pending_compat_value = value;
+        g_pending_compat_text = text;
+        g_compat_pending = true;
+        return;
+    }
+    VS_LOG("ProxySetAppCompatStringPointer forwarding");
+    reinterpret_cast<SetAppCompatStringPointerFn>(
+        g_fwd_SetAppCompatStringPointer)(value, text);
 }
 
 // ---------------------------------------------------------------------------
@@ -309,12 +421,24 @@ extern "C" HRESULT WINAPI ProxyCreateDXGIFactory2(UINT flags, REFIID riid,
 // ---------------------------------------------------------------------------
 extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
+        VS_ODS("dxgi DllMain enter");
         g_self_module = instance;
         DisableThreadLibraryCalls(instance);
+#if defined(VSYNC_DEBUG_LOG)
+        vsync_proxy::DebugInstall(instance);
+#endif
+        VS_LOG("dxgi DllMain attach");
+        VS_LOG_PTR("dxgi DllMain instance", instance);
+
         vsync_proxy::LoadConfig(instance, g_config);
+        VS_LOG_PTR("dxgi DllMain config interval",
+                   reinterpret_cast<void*>(
+                       static_cast<ULONG_PTR>(g_config.sync_interval)));
 
         HMODULE real = vsync_proxy::LoadSystemLibrary(L"dxgi.dll");
+        VS_LOG_PTR("dxgi DllMain real module", real);
         if (real == nullptr || real == reinterpret_cast<HMODULE>(instance)) {
+            VS_LOG("dxgi DllMain real module invalid");
             return FALSE;
         }
 
@@ -325,6 +449,13 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
         g_create_factory2 = reinterpret_cast<CreateDXGIFactory2Fn>(
             vsync_proxy::ResolveExport(real, "CreateDXGIFactory2"));
 
+        VS_LOG_PTR("dxgi real CreateDXGIFactory",
+                   reinterpret_cast<void*>(g_create_factory));
+        VS_LOG_PTR("dxgi real CreateDXGIFactory1",
+                   reinterpret_cast<void*>(g_create_factory1));
+        VS_LOG_PTR("dxgi real CreateDXGIFactory2",
+                   reinterpret_cast<void*>(g_create_factory2));
+
 #define VS_RESOLVE_FORWARD(name) \
     g_fwd_##name = vsync_proxy::ResolveExport(real, #name);
         VS_DXGI_FORWARD_LIST(VS_RESOLVE_FORWARD)
@@ -332,8 +463,18 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
 
         if (g_create_factory == nullptr && g_create_factory1 == nullptr &&
             g_create_factory2 == nullptr) {
+            VS_LOG("dxgi DllMain no factory exports");
             return FALSE;
         }
+
+        if (g_compat_pending && g_fwd_SetAppCompatStringPointer != nullptr) {
+            reinterpret_cast<SetAppCompatStringPointerFn>(
+                g_fwd_SetAppCompatStringPointer)(g_pending_compat_value,
+                                                 g_pending_compat_text);
+            g_compat_pending = false;
+            VS_LOG("dxgi DllMain replayed AppCompat string");
+        }
+        VS_LOG("dxgi DllMain attach complete");
     }
     return TRUE;
 }

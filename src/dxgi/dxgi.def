@@ -17,5 +17,5 @@ EXPORTS
     PIXBeginCapture=vs_fwd_stub_PIXBeginCapture
     PIXEndCapture=vs_fwd_stub_PIXEndCapture
     PIXGetCaptureState=vs_fwd_stub_PIXGetCaptureState
-    SetAppCompatStringPointer=vs_fwd_stub_SetAppCompatStringPointer
+    SetAppCompatStringPointer=ProxySetAppCompatStringPointer
     UpdateHMDEmulationStatus=vs_fwd_stub_UpdateHMDEmulationStatus

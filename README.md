@@ -115,7 +115,11 @@ load the real DLL or resolve the creation exports.
 - Windows 10 and Windows 11.
 - 64-bit and 32-bit (WOW64) processes.
 - DirectX 10, 11, 12 and Direct3D 9 / 9Ex.
-- Tested end-to-end on Windows 11 with x64 and x86 DXGI/D3D9 probes.
+- Games that use Windows Application Compatibility layers (`RUNASADMIN`,
+  `HIGHDPIAWARE`, `DISABLEDXMAXIMIZEDWINDOWEDMODE`); compat exports are safe
+  to call during loader initialization.
+- Tested end-to-end on Windows 11 with x64 and x86 DXGI/D3D9 probes and with
+  Unity games running under Application Compatibility layers.
 - Not covered: Direct3D 8 and earlier, OpenGL, Vulkan, and games that do not
   present through DXGI or D3D9.
 
@@ -149,8 +153,9 @@ The `tests` folder contains end-to-end probes:
 
 - `tests/dxgi_probe.cpp` creates a D3D11 device and both flip and legacy swap
   chains, checks the factory and `Present`/`Present1` hooks, calls
-  `Present(0, DXGI_PRESENT_ALLOW_TEARING)`, and covers
-  `D3D11CreateDeviceAndSwapChain`.
+  `Present(0, DXGI_PRESENT_ALLOW_TEARING)`, covers
+  `D3D11CreateDeviceAndSwapChain`, and calls the AppCompat export
+  `SetAppCompatStringPointer` to catch early-call regressions.
 - `tests/d3d9_probe.cpp` creates base and Ex devices with
   `D3DPRESENT_INTERVAL_IMMEDIATE`, then verifies that creation, additional
   swap chains, `Reset` and `ResetEx` rewrite the interval to

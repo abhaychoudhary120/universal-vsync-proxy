@@ -37,7 +37,13 @@ bool AddressInModule(HMODULE module, const void* address) {
         return false;
     }
     const auto* end = base + nt->OptionalHeader.SizeOfImage;
-    return address >= base && address < end;
+    const bool inside = address >= base && address < end;
+    if (!inside) {
+        std::printf("  [debug] address=%p base=%p end=%p\n", address,
+                    static_cast<const void*>(base),
+                    static_cast<const void*>(end));
+    }
+    return inside;
 }
 
 void PrintModulePath(HMODULE module, const char* label) {
@@ -195,6 +201,38 @@ int main() {
             }
 
             device->Release();
+        }
+    }
+
+    // COPY swap effects must keep working: forcing the interval on them is
+    // accepted by the runtime, so verify the device is created and presents.
+    if (direct3d != nullptr && window != nullptr) {
+        HWND copy_window = CreateProbeWindow(L"VSyncProxyD3D9ProbeCopy");
+        if (copy_window != nullptr) {
+            D3DPRESENT_PARAMETERS parameters =
+                MakePresentParameters(copy_window, 1);
+            parameters.SwapEffect = D3DSWAPEFFECT_COPY;
+            parameters.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+            IDirect3DDevice9* copy_device = nullptr;
+            const HRESULT result = direct3d->CreateDevice(
+                D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, copy_window,
+                D3DCREATE_SOFTWARE_VERTEXPROCESSING, &parameters,
+                &copy_device);
+            Check(SUCCEEDED(result) && copy_device != nullptr,
+                  "COPY swap effect device is accepted");
+            Check(parameters.PresentationInterval == D3DPRESENT_INTERVAL_ONE,
+                  "COPY swap effect is forced to interval ONE");
+            if (copy_device != nullptr) {
+                Check(PresentIntervalIsOne(copy_device),
+                      "COPY device presents with interval ONE");
+                Check(SUCCEEDED(copy_device->Present(nullptr, nullptr, nullptr,
+                                                     nullptr)),
+                      "COPY Present is accepted");
+                copy_device->Release();
+            }
+            DestroyWindow(copy_window);
+        } else {
+            Check(false, "create COPY probe window");
         }
     }
 

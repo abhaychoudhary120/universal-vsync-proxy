@@ -6,7 +6,7 @@
 // hooked as well.
 
 #include <windows.h>
-#include <dxgi1_3.h>
+#include <dxgi1_4.h>
 #include <d3d11.h>
 
 #include <cstdio>
@@ -37,7 +37,13 @@ bool AddressInModule(HMODULE module, const void* address) {
         return false;
     }
     const auto* end = base + nt->OptionalHeader.SizeOfImage;
-    return address >= base && address < end;
+    const bool inside = address >= base && address < end;
+    if (!inside) {
+        std::printf("  [debug] address=%p base=%p end=%p\n", address,
+                    static_cast<const void*>(base),
+                    static_cast<const void*>(end));
+    }
+    return inside;
 }
 
 void PrintModulePath(HMODULE module, const char* label) {
@@ -83,6 +89,22 @@ int main() {
             Check(SUCCEEDED(declare_removal_support()),
                   "forwarded export reaches the system DLL");
         }
+
+        // Regression: AcGenral (Application Compatibility) calls this export
+        // while the process is still initializing, before the proxy has
+        // resolved the real dxgi. It must be a safe wrapper, never a jump
+        // through a null target slot.
+        using SetAppCompatStringPointerFn = void(WINAPI*)(ULONG_PTR,
+                                                          const char*);
+        const auto set_app_compat =
+            reinterpret_cast<SetAppCompatStringPointerFn>(
+                GetProcAddress(proxy, "SetAppCompatStringPointer"));
+        Check(set_app_compat != nullptr,
+              "SetAppCompatStringPointer export is present");
+        if (set_app_compat != nullptr) {
+            set_app_compat(0, "UniversalVSyncProxyProbe");
+            Check(true, "SetAppCompatStringPointer is callable");
+        }
     }
 
     HWND window = CreateProbeWindow();
@@ -96,6 +118,29 @@ int main() {
     if (factory != nullptr) {
         Check(AddressInModule(proxy, (*(void***)factory)[10]),
               "factory CreateSwapChain vtable slot is hooked");
+        Check(AddressInModule(proxy, (*(void***)factory)[21]),
+              "factory CreateSwapChainForComposition slot is hooked");
+
+        // Slot 24 is IDXGIFactory4::EnumWarpAdapter, not a swap-chain creator.
+        // Calling it proves the proxy did not overwrite it.
+        IDXGIFactory4* factory4 = nullptr;
+        if (SUCCEEDED(factory->QueryInterface(
+                __uuidof(IDXGIFactory4),
+                reinterpret_cast<void**>(&factory4))) &&
+            factory4 != nullptr) {
+            IDXGIAdapter1* warp_adapter = nullptr;
+            result = factory4->EnumWarpAdapter(
+                __uuidof(IDXGIAdapter1),
+                reinterpret_cast<void**>(&warp_adapter));
+            Check(SUCCEEDED(result) || result == DXGI_ERROR_NOT_FOUND,
+                  "IDXGIFactory4::EnumWarpAdapter is intact");
+            if (warp_adapter != nullptr) {
+                warp_adapter->Release();
+            }
+            factory4->Release();
+        } else {
+            Check(false, "query IDXGIFactory4");
+        }
     }
 
     ID3D11Device* device = nullptr;
